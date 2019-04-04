@@ -1,0 +1,232 @@
+COMP 321 Project 5: Malloc
+<Bowen Liu: bl28; Tianrun Ke: tk26>
+
+---(Do not write lines of text that exceed the width of this line.)------------
+
+DESIGN DESCRIPTION
+
+In this assignment, we are asked to implement a dynamic memory allocator for C
+program. 
+
+To start with, we considered how to store allocated blocks and free blocks in 
+order to access them in the future. We have decided to use segregated free 
+lists to store the free blocks with different sizes. For size classification, 
+we thought it would be better if we could allocate small size memory within a 
+range of size to have the same block size so that the program would not waste 
+much time on splitting the larger free blocks into smaller ones every time we
+are trying to allocate memory. As for memory with a larger size, we simply 
+rounded it up to the next second largest multiple of double word size. We would
+use double linked lists to store the header of free blocks with similar size. 
+
+
+We have decided to use different data structure for allocated block and free 
+blocks. 
+
+Allocated block structure:
+-----------------------------------
+|          Header   |  |  |f/a|f/a|
+-----------------------------------
+|                                 |
+|                                 | 
+|                                 | 
+|                                 |
+|          Payload                | 
+|                                 |
+|                                 |
+|                                 |      
+|                                 |  
+-----------------------------------    
+|          Padding                |
+-----------------------------------
+
+For allocated block, the first word size bytes would be the header. 
+The header will store the total number of bits in this allocated block. Since 
+the size of allocated block is always a multiple of 2 word size, we don't 
+really need to care about the last 4 bits in the header when we are checking 
+the size of the block. We decided to use the last second bit to indicate 
+whether the previous block is allocated or not, and the last bit indicating 
+whether this block is allocated or not. The rest space in the allocated block 
+are used to store values or padding to meet the alignment requirement. We did 
+not design any footer for allocated blocks. 
+
+Free block structure:
+-----------------------------------
+|          Header   |  |  |f/a|f/a|
+-----------------------------------
+|          Next Pointer           |
+-----------------------------------
+|          Prev Pointer           | 
+-----------------------------------
+|                                 | 
+|                                 |
+|          Payload                | 
+|                                 |
+|                                 |
+|                                 |      
+|                                 |      
+-----------------------------------
+|          Footer                 |
+-----------------------------------
+
+For free blocks, the first word size bytes has the same format as in allocated
+blocks. The next word size bytes would store a pointer pointing to its previous
+free block in the free blocks linked list. The next word size bytes are used to
+store a pointer pointing to its next free block in the free blocks linked 
+list. This design can help us easily track the availability of free blocks of 
+similar size. We also designed a word size footer that would store the same 
+content as the header in this free block so that its next block in the 
+page table can easily locate the header of the free block.
+
+
+We divided the project into several functionalities:
+
+The first one is to perform all necessary initialization. Since we decided to 
+use linked lists to store the free blocks, we need to store them at the 
+beginning of the heap. After that, we would set up the prologue and epilogue 
+and mark them as allocated block.
+
+The second one is to merge the given free block with its adjacent free block,
+if there is any. We first check whether there is any adjacent free block 
+available for the given free block. Based on the result of checking, we would
+have in total four conditions. We would merge the given free block with its
+free neighbor and remove the given block's free neighbor from its corresponding
+free block linked list.
+
+The third one is to free the allocated block pointed by the given block
+pointer. In this part, we would first perform a sanity check. If the given 
+pointer is not pointing to anything, then we would do nothing. Since this part 
+is only guaranteed to work when the passed block pointer is returned by an 
+earlier call to dynamic allocation functionalities, we no longer need to check 
+whether this given pointer is really pointing to an allocated memory. To set 
+an allocated block as free, we need to modify the content stored in its header.
+We would toggle the last bit of its header so that we can tell it is now a free
+block. Because the difference of data structure for allocated blocks and free 
+blocks, we need to add footer with the same content in header to the current 
+block. For either type of blocks, we have a bit in its header indicating
+whether the previous block is allocated; therefore, when we are freeing the 
+current block, we need to remember changing the header of the next block as 
+well. Now, we have successfully set the header and footer of this to-be-freed
+block. We need to check the necessity of merging this free block with its 
+adjacent free blocks, if there is any. Considering that the merging operation
+is relatively expensive in terms of operating time, we decided that we would
+only carry out this operation if and only if the size of the current block fits
+in a set range. The final step is to put this freed block into the 
+corresponding free block linked list so that we can keep track of available
+free block when we are allocating another piece of memory in the future.
+
+The fourth one is to dynamically allocate a given size of memory. Since we have
+header in our allocated blocks, the actually size of allocated blocks is larger 
+than given size of memory. We need to calculate the size of the allocate block.
+The calculating strategy is that if the given size of memory is less than 129 
+word sizes, we would see this memory with size that is the smallest possible 
+power of 2 plus a word size so that these small blocks would have uniform size 
+and thus save the time to split them up when allocating similar size of small 
+memories. As for those memories with size larger than 129 word sizes, we just
+rounded their size plus a word size to the closest multiple of 2 word size. 
+Determined the allocated size, we would go into free block linked lists to 
+find an available free block. We would start our search in the free list 
+corresponding to the allocated size and if no available block was found, we 
+would look into free block lists corresponding to larger size. Since free block
+list is stored in the form of double linked list, it is very convenient for us 
+to loop over it. Once we find this available block we would proceed to 
+determine whether to cut the block in to suitable size and then put header 
+into the block. However, if we failed to find an available free block for us to
+allocate, we would have no choice but to extend the current heap so that the 
+memory can be successfully allocated. In the process of extending the heap, 
+we marked the extended part as a free block and updated its adjacent blocks 
+so that they know there is a new free block appeared. We would also merge 
+this new free block with its adjacent free blocks and then add the merge block
+to the free block list. After that we would cut the block in to suitable size
+and then put header into the block, the same thing we did if we find an 
+available block in the free block list.
+
+The final one is to reallocate the original allocated block so that it would 
+have at least given size of payload in the block. Of course, if the given 
+pointer in invalid or the given size is 0, we do nothing. If the given size is
+smaller than the actual size of payload in the original allocated block, there
+is nothing we need to do because we have already satisfied the requirement.
+However, if the requested size is larger than the payload size in the original 
+block, we need to check whether we can merge our block with adjacent free 
+blocks so that we can have enough space. If we can, we would merge them 
+together, copy the memory stored in the original allocated block and return 
+the payload pointer of the merge block. For the worst case, even merging can't
+help us finding an available block, we have to find another place to allocate 
+this new block of memory. After successfully allocated it, we would copy the 
+memory store in the original block to the newly allocated block and free the 
+orignal block. 
+
+TESTING STRATEGY
+
+Our testing has two parts: functionality testing and performance testing.
+We want to correctly implement all the functionalities first and then try to
+improve the performance
+
+Functionality:
+
+Our goal here is just to let program can pass all the trace files without
+errors, such as core dump, first, not to focus on the performance.
+
+We first test the memory allocation and free by using the two basic trace files
+short1 and short2, without splitting and coalescing. We want to focus on 
+whether the program can find the block with correct flags and size, whether 
+it can insert and remove the free blocks from the correct free lists, and 
+whether it can update the flags in block headers correctly. When allocate or 
+free each block, we print its beginning pointer, ending pointer, header, as 
+well as footer and free list index if possible, to check the correctness. 
+We also test the re-extend heap functionality here by checking whether the 
+required size is extended and the newly created free block is inserted 
+correctly.
+
+After the program passes these two trace files without errors, we add the
+coalescing and splitting functionality and test the program with the two basic
+trace files again. We keep all printing in the previous part. When the program
+splits a block, we first print the block's start address, end address and 
+contents of the header and then we print the splinted two blocks' start 
+address, end address and contents of the header to check whether the splitting 
+is correct When the program coalesces two blocks, we first print the two 
+blocks' start addresses, end addresses and contents of the headers and then 
+we print the merged blocks' start address, end address and contents of the 
+header to check whether the coalescing is correct.
+
+Since these two basic traces are small, we can let the program finish and then
+directly look at what is printed out to debug.
+
+After the program passes these two basic traces, we test the program with all
+other traces except the two traces having re-allocation. We keep all the
+printings and test the traces one by one. If the program passes one trace, we
+move to next one and go back to all the previous ones again, and keep repeating
+this, because some changes may cause new errors in previous traces. 
+We use the gdb to set break points before the end of each functions and print
+out the information for each operation, such as coalescing, to check 
+correctness. If the program passes all the traces this time, since these traces
+are very various and contains lots of different situations inside, we endorse
+that the free, allocation, coalescing and splitting are implemented correctly.
+
+After the program passes all the other traces, we move to the reallocation
+traces. We keep all the printing statements in previous part and add some new
+one. When the program do reallocation, we print the information of the current
+block to be reallocated. If any other operations happen during the reallocation
+we print all the necessary information. If the program passes the reallocation
+traces, we move back to the other traces to see whether there are new errors
+and repeating the debugging procedure.
+
+After the program can pass all the traces, we endorse that our program is
+implemented functionally correctly.
+
+Performance:
+
+Now our goal is to improve the performance as high as possible. 
+
+We go through the traces one by one. For each file, we first run once without 
+printing anything and record the utilities and throughput. Then we run the 
+program in debug mode and look over the pattern inside the traces and printed 
+information to figure out what may cause the utilities and throughput be low. 
+Then we turn off the debug mode, since the printings will cost times, to run
+the program again to see whether there is any improvement. We keep repeating 
+this procedure until we are satisfied with the score. Then we went to the next
+trace. If we make any change for one trace, we also run all the other traces to
+see whether they are affected. We notice that improvement for one trace may
+cause regressions or errors in other traces. So, we carefully make changes and
+find a balance for all the traces.
+Finally, we choose the version that get the highest overall scores.
+
